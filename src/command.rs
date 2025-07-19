@@ -1,38 +1,25 @@
-use std::env;
-use std::path::Path;
-use std::process::Command;
+// src/command.rs
 
-pub fn handle_command(input: &str) {
-    let mut parts = input.trim().split_whitespace();
-    let command = parts.next().unwrap_or("");
-    let args: Vec<&str> = parts.collect();
+use std::error::Error;
+use std::process::{Command, ExitStatus};
 
-    match command {
-        "cd" => {
-            let new_dir = args.get(0).map_or_else(
-                || home::home_dir().unwrap_or_else(|| Path::new("/").to_path_buf()),
-                |x| Path::new(x).to_path_buf(),
-            );
-            if let Err(e) = env::set_current_dir(&new_dir) {
-                eprintln!("cd: {}", e);
-            }
-        }
-        "" => (),
-        _ => {
-            let mut child = Command::new(command)
-                .args(args)
-                .spawn();
+/// Spawns `program` with `args`, waits for it to finish, and returns its exit status.
+pub fn execute_command(program: &str, args: &[&str]) -> Result<ExitStatus, Box<dyn Error>> {
+    // `child.wait()` requires &mut self, so we must declare `mut child`
+    let mut child = Command::new(program)
+        .args(args)
+        .spawn()?;
+    let status = child.wait()?;
+    Ok(status)
+}
 
-            match child {
-                Ok(mut child) => {
-                    if let Err(e) = child.wait() {
-                        eprintln!("Error waiting for command: {}", e);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{}: {}", command, e);
-                }
-            }
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_echo() {
+        let status = execute_command("echo", &["hello"]).unwrap();
+        assert!(status.success());
     }
 }

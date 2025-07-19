@@ -1,3 +1,4 @@
+# Cargo.toml
 [package]
 name = "cd_shell"
 version = "0.1.0"
@@ -8,6 +9,7 @@ home = "0.5.3"
 dotenvy = "0.15.7"
 crossterm = "0.27.0"
 walkdir = "2.4.0"
-# Official Rust client for Google Generative AI (Gemini)
-google-ai-rs = { version = "0.1.1", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
+
+# Official Rust client for Google Gemini APIs
+google-ai-rs = { version = "0.1.1", features = ["serde"] }

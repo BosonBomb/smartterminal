@@ -1,80 +1,33 @@
-use crate::command::handle_command;
-use crate::prompt::get_suggestion;
-use crossterm::{
-    event::{self, Event, KeyCode},
-    execute,
-    style::{Color, Print, ResetColor, SetForegroundColor},
-    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
-};
-use std::io::{self, stdout};
-use std::time::Duration;
+// src/terminal.rs
 
-pub async fn run() -> io::Result<()> {
-    enable_raw_mode()?;
-    let mut stdout = stdout();
+use std::error::Error;
+use std::io::{self, Write};
+use crate::{command::execute_command, prompt::get_suggestion};
 
-    let mut input = String::new();
-    let mut last_input = String::new();
-    let mut suggestion = String::new();
-
+/// Runs the interactive loop:
+/// 1. Reads a line
+/// 2. Fetches a `cd` suggestion (if applicable) and prints it
+/// 3. Invokes the suggestion as a real command
+pub async fn run() -> Result<(), Box<dyn Error>> {
     loop {
-        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-        let display_dir = if let Some(home_dir) = home::home_dir() {
-            if let Ok(stripped) = current_dir.strip_prefix(&home_dir) {
-                format!("~/{}>", stripped.display())
-            } else {
-                format!("{}>", current_dir.display())
-            }
-        } else {
-            format!("{}>", current_dir.display())
-        };
+        print!("> ");
+        io::stdout().flush()?;
 
-        if input != last_input {
-            suggestion = get_suggestion(&input).await;
-            last_input = input.clone();
-        }
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim_end();
 
-        execute!(
-            stdout,
-            Clear(ClearType::All),
-            crossterm::cursor::MoveTo(0, 0),
-            Print(&display_dir),
-            Print(&input),
-            SetForegroundColor(Color::Grey),
-            Print(&suggestion),
-            ResetColor
-        )?;
+        // Ask Gemini for a completion
+        let suggestion = get_suggestion(&input).await?;
+        if !suggestion.is_empty() {
+            println!("Suggestion: {}", suggestion);
 
-        if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key_event) = event::read()? {
-                match key_event.code {
-                    KeyCode::Char(c) => {
-                        input.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        input.pop();
-                    }
-                    KeyCode::Tab => {
-                        input.push_str(&suggestion);
-                        suggestion.clear();
-                    }
-                    KeyCode::Enter => {
-                        if input.trim() == "exit" {
-                            break;
-                        }
-                        handle_command(&input);
-                        input.clear();
-                        suggestion.clear();
-                    }
-                    KeyCode::Esc => {
-                        break;
-                    }
-                    _ => {}
-                }
+            // Optionally execute it
+            let parts: Vec<&str> = suggestion.split_whitespace().collect();
+            if let Some((prog, args)) = parts.split_first() {
+                let status = execute_command(prog, args)?;
+                println!("Exited with: {}", status);
             }
         }
     }
-
-    disable_raw_mode()?;
-    Ok(())
 }

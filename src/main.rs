@@ -1,17 +1,11 @@
-mod command;
+// src/main.rs
+
 mod prompt;
 mod terminal;
-
-use dotenvy::dotenv;
-use std::{env, io};
+mod command;
 
 #[tokio::main]
-async fn main() -> io::Result<()> {
-    dotenv().ok();
-
-    if let Some(home_dir) = home::home_dir() {
-        env::set_current_dir(&home_dir)?;
-    }
-
-    terminal::run().await
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    terminal::run().await?;
+    Ok(())
 }
