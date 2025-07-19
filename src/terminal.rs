@@ -7,12 +7,14 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
 };
 use std::io::{self, stdout};
+use std::time::Duration;
 
 pub async fn run() -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
 
     let mut input = String::new();
+    let mut last_input = String::new();
     let mut suggestion = String::new();
 
     loop {
@@ -27,9 +29,15 @@ pub async fn run() -> io::Result<()> {
             format!("{}>", current_dir.display())
         };
 
+        if input != last_input {
+            suggestion = get_suggestion(&input).await;
+            last_input = input.clone();
+        }
+
         execute!(
             stdout,
             Clear(ClearType::All),
+            crossterm::cursor::MoveTo(0, 0),
             Print(&display_dir),
             Print(&input),
             SetForegroundColor(Color::Grey),
@@ -37,32 +45,32 @@ pub async fn run() -> io::Result<()> {
             ResetColor
         )?;
 
-        if let Event::Key(key_event) = event::read()? {
-            match key_event.code {
-                KeyCode::Char(c) => {
-                    input.push(c);
-                    suggestion = get_suggestion(&input).await;
-                }
-                KeyCode::Backspace => {
-                    input.pop();
-                    suggestion = get_suggestion(&input).await;
-                }
-                KeyCode::Tab => {
-                    input.push_str(&suggestion);
-                    suggestion.clear();
-                }
-                KeyCode::Enter => {
-                    if input.trim() == "exit" {
+        if event::poll(Duration::from_millis(50))? {
+            if let Event::Key(key_event) = event::read()? {
+                match key_event.code {
+                    KeyCode::Char(c) => {
+                        input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        input.pop();
+                    }
+                    KeyCode::Tab => {
+                        input.push_str(&suggestion);
+                        suggestion.clear();
+                    }
+                    KeyCode::Enter => {
+                        if input.trim() == "exit" {
+                            break;
+                        }
+                        handle_command(&input);
+                        input.clear();
+                        suggestion.clear();
+                    }
+                    KeyCode::Esc => {
                         break;
                     }
-                    handle_command(&input);
-                    input.clear();
-                    suggestion.clear();
+                    _ => {}
                 }
-                KeyCode::Esc => {
-                    break;
-                }
-                _ => {}
             }
         }
     }

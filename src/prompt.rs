@@ -1,81 +1,59 @@
-use google_generative_ai_rs::v1::gemini::{Content, GenerativeModel, Part, Role};
-use std::env;
+extern crate google_ai_rs;
+use std::{env, error::Error, fs, path::PathBuf};
 use walkdir::WalkDir;
+use dotenvy::dotenv;
 
-pub async fn get_suggestion(input: &str) -> String {
+// Import the type-safe SDK
+use google_ai_rs::{Client, generative::GenerativeModel};
+
+/// Returns a shell completion suggestion by querying Google Gemini.
+/// Propagates errors so the caller can handle them.
+pub async fn get_suggestion(input: &str) -> Result<String, Box<dyn Error>> {
+    dotenv().ok(); // Load .env variables if present
+
+    // Only complete `cd ` commands
     if !input.starts_with("cd ") {
-        return String::new();
+        return Ok(String::new());
     }
 
-    let partial_path = &input[3..];
-    if partial_path.is_empty() {
-        return String::new();
+    let partial = input[3..].trim();
+    if partial.is_empty() {
+        return Ok(String::new());
     }
 
-    let home_dir = match home::home_dir() {
-        Some(dir) => dir,
-        None => return String::new(),
-    };
-
-    let mut candidates = Vec::new();
-    for entry in WalkDir::new(&home_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    // Collect matching directory paths under $HOME
+    let home_dir: PathBuf = home::home_dir().ok_or("Could not determine home directory")?;
+    let mut options = Vec::new();
+    for entry in WalkDir::new(&home_dir).into_iter().filter_map(Result::ok) {
         if entry.file_type().is_dir() {
-            if let Some(path_str) = entry.path().to_str() {
-                if path_str.contains(partial_path) {
-                    candidates.push(path_str.to_string());
+            if let Some(p) = entry.path().to_str() {
+                if p.contains(partial) {
+                    options.push(p.to_string());
                 }
             }
         }
     }
-
-    if candidates.is_empty() {
-        return String::new();
+    if options.is_empty() {
+        return Ok(String::new());
     }
 
-    let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
-    let generative_model =
-        GenerativeModel::new("gemini-1.5-flash", api_key).expect("Failed to create generative model");
+    // Load API key from environment
+    let api_key = env::var("API_KEY").or_else(|_| env::var("GEMINI_API_KEY"))?;
+    let client = Client::new(api_key).await?;
 
+    // Build prompt for Gemini
     let prompt = format!(
-        "You are an expert shell command assistant. Your task is to complete the user's command based on the context provided. Provide only the single, most likely shell command as your answer.
-
----
-**Context:**
-1.  **User's Current Directory:** {}
-2.  **User's Incomplete Command:** {}
-3.  **Search Results:** My script found the following possible full paths for \"{}\":
-    - {}
----
-
-Based on this context, what is the most likely command the user wants to execute?",
-        env::current_dir().unwrap().display(),
+        "You are a shell completion assistant. Current dir: {}\nIncomplete: {}\nCandidates:\n- {}",
+        env::current_dir()?.display(),
         input,
-        partial_path,
-        candidates.join("\n    - ")
+        options.join("\n- ")
     );
 
-    let content = Content {
-        role: Role::User,
-        parts: vec![Part {
-            text: Some(prompt),
-            ..Default::default()
-        }],
-    };
+    // Call Gemini model
+    let response = client
+        .generative_model("gemini-2.5-flash")
+        .generate_content(&prompt)
+        .await?;
 
-    match generative_model.generate_content(vec![content]).await {
-        Ok(response) => {
-            if let Some(candidate) = response.candidates.first() {
-                if let Some(part) = candidate.content.parts.first() {
-                    if let Some(text) = &part.text {
-                        return text.trim_start_matches(input).to_string();
-                    }
-                }
-            }
-            String::new()
-        }
-        Err(_) => String::new(),
-    }
+    Ok(response.text)
 }
